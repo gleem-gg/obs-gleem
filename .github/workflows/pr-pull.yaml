@@ -1,0 +1,29 @@
+name: Pull Request
+run-name: ${{ github.event.pull_request.title }} pull request run 🚀
+on:
+  workflow_dispatch:
+  # Opened and reopened only, not on every push to the branch: re-run it
+  # through workflow_dispatch when a PR needs a fresh build.
+  pull_request:
+    paths-ignore:
+      - '**.md'
+    branches: [master, main]
+    types: [ opened, reopened ]
+permissions:
+  contents: read
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+jobs:
+  check-format:
+    name: Check Formatting 🔍
+    uses: ./.github/workflows/check-format.yaml
+    permissions:
+      contents: read
+
+  build-project:
+    name: Build Project 🧱
+    uses: ./.github/workflows/build-project.yaml
+    secrets: inherit
+    permissions:
+      contents: read

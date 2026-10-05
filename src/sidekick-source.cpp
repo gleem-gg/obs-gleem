@@ -27,6 +27,8 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <deque>
+#include <vector>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -112,6 +114,50 @@ struct SidekickSource {
 	std::string error;
 
 	std::thread worker;
+
+	// Audio from the child, handed to this source by its own thread. The
+	// child calls back while holding its filter and audio locks, and the
+	// graphics thread takes this source's filter lock and then the child's
+	// (get_width), so outputting from inside the callback deadlocks OBS.
+	struct AudioChunk {
+		std::vector<float> planes[MAX_AUDIO_CHANNELS];
+		uint32_t frames = 0;
+		uint64_t timestamp = 0;
+	};
+	std::mutex audio_mutex;
+	std::condition_variable audio_wake;
+	std::deque<AudioChunk> audio_queue;
+	bool audio_stopping = false;
+	std::thread audio_worker;
+
+	void audio_run()
+	{
+		const struct audio_output_info *info = audio_output_get_info(obs_get_audio());
+
+		while (true) {
+			AudioChunk chunk;
+			{
+				std::unique_lock lock(audio_mutex);
+				audio_wake.wait(lock, [this] { return audio_stopping || !audio_queue.empty(); });
+				if (audio_stopping)
+					return;
+				chunk = std::move(audio_queue.front());
+				audio_queue.pop_front();
+			}
+
+			struct obs_source_audio audio = {};
+			for (size_t i = 0; i < MAX_AUDIO_CHANNELS; i++)
+				audio.data[i] = chunk.planes[i].empty()
+							? nullptr
+							: reinterpret_cast<const uint8_t *>(chunk.planes[i].data());
+			audio.frames = chunk.frames;
+			audio.timestamp = chunk.timestamp;
+			audio.format = AUDIO_FORMAT_FLOAT_PLANAR;
+			audio.speakers = info->speakers;
+			audio.samples_per_sec = info->samples_per_sec;
+			obs_source_output_audio(source, &audio);
+		}
+	}
 
 	// Worker thread only.
 	std::string applied_uuid;
@@ -252,22 +298,30 @@ struct SidekickSource {
 
 void forward_audio(void *param, obs_source_t *, const struct audio_data *data, bool muted)
 {
-	if (muted)
+	if (muted || data->frames == 0)
 		return;
 
 	auto *s = static_cast<SidekickSource *>(param);
-	const struct audio_output_info *info = audio_output_get_info(obs_get_audio());
+	const size_t channels = audio_output_get_channels(obs_get_audio());
 
-	struct obs_source_audio audio = {};
-	for (size_t i = 0; i < MAX_AV_PLANES; i++)
-		audio.data[i] = data->data[i];
-	audio.frames = data->frames;
-	audio.timestamp = data->timestamp;
-	audio.format = AUDIO_FORMAT_FLOAT_PLANAR;
-	audio.speakers = info->speakers;
-	audio.samples_per_sec = info->samples_per_sec;
+	SidekickSource::AudioChunk chunk;
+	chunk.frames = data->frames;
+	chunk.timestamp = data->timestamp;
+	for (size_t i = 0; i < channels && i < MAX_AUDIO_CHANNELS; i++) {
+		if (!data->data[i])
+			continue;
+		const auto *samples = reinterpret_cast<const float *>(data->data[i]);
+		chunk.planes[i].assign(samples, samples + data->frames);
+	}
 
-	obs_source_output_audio(s->source, &audio);
+	{
+		std::lock_guard lock(s->audio_mutex);
+		// A stalled consumer must not grow without bound: about two seconds.
+		if (s->audio_queue.size() >= 100)
+			s->audio_queue.pop_front();
+		s->audio_queue.push_back(std::move(chunk));
+	}
+	s->audio_wake.notify_one();
 }
 
 const char *get_name(void *)
@@ -302,6 +356,7 @@ void *create(obs_data_t *settings, obs_source_t *source)
 		delete s;
 		return nullptr;
 	}
+	s->audio_worker = std::thread(&SidekickSource::audio_run, s);
 	obs_source_add_audio_capture_callback(s->child, forward_audio, s);
 
 	update(s, settings);
@@ -313,6 +368,15 @@ void *create(obs_data_t *settings, obs_source_t *source)
 void destroy(void *data)
 {
 	auto *s = static_cast<SidekickSource *>(data);
+	obs_source_remove_audio_capture_callback(s->child, forward_audio, s);
+	{
+		std::lock_guard lock(s->audio_mutex);
+		s->audio_stopping = true;
+	}
+	s->audio_wake.notify_all();
+	if (s->audio_worker.joinable())
+		s->audio_worker.join();
+
 	{
 		std::lock_guard lock(s->mutex);
 		s->stopping = true;
@@ -322,7 +386,6 @@ void destroy(void *data)
 		s->worker.join();
 
 	GleemAccount::instance().unwatch();
-	obs_source_remove_audio_capture_callback(s->child, forward_audio, s);
 	obs_source_release(s->child);
 	delete s;
 }

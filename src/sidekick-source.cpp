@@ -233,6 +233,8 @@ struct SidekickSource {
 			}
 
 			const bool stale = !child_input.empty() && now - input_set_at > connect_grace;
+			if (child_input.empty() && now < next_attempt)
+				continue; // Keep showing the last error until the retry.
 			if ((child_input.empty() || stale || force) && now >= next_attempt) {
 				std::string url;
 				std::string error;

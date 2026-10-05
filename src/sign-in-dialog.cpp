@@ -19,6 +19,7 @@
 #include "sign-in-dialog.hpp"
 
 #include "gleem-account.hpp"
+#include "sidekick-source.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -29,6 +30,7 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPointer>
 #include <QPushButton>
 #include <QTimer>
 #include <QUrl>
@@ -43,9 +45,13 @@ QString text(const char *key)
 
 } // namespace
 
-SignInDialog::SignInDialog(QWidget *parent) : QDialog(parent)
+SignInDialog::SignInDialog(QWidget *parent) : QDialog(parent, Qt::Dialog)
 {
 	setWindowTitle(text("Gleem.SignIn.Title"));
+	setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
+	// Non-modal on purpose: Wayland compositors pin modal dialogs to their
+	// parent and drag the parent along with them.
+	setWindowModality(Qt::NonModal);
 	setMinimumWidth(420);
 
 	message_ = new QLabel(this);
@@ -101,12 +107,21 @@ SignInDialog::~SignInDialog()
 
 void SignInDialog::run()
 {
-	auto *parent = static_cast<QWidget *>(obs_frontend_get_main_window());
-	if (QWidget *active = QApplication::activeWindow())
-		parent = active;
+	// One at a time, whether opened from Tools or from a source.
+	static QPointer<SignInDialog> open;
+	if (open) {
+		open->raise();
+		open->activateWindow();
+		return;
+	}
 
-	SignInDialog dialog(parent);
-	dialog.exec();
+	// Parented to the main window like OBS's own dialogs.
+	auto *parent = static_cast<QWidget *>(obs_frontend_get_main_window());
+	open = new SignInDialog(parent);
+	open->setAttribute(Qt::WA_DeleteOnClose);
+	// Open source properties show the account; let them catch up.
+	connect(open, &QDialog::finished, [] { refresh_sidekick_properties(); });
+	open->show();
 }
 
 void SignInDialog::showSignedIn()

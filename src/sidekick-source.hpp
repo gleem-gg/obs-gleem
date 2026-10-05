@@ -19,3 +19,7 @@
 #pragma once
 
 void register_sidekick_source();
+
+// Reload the properties of every open Gleem IRL Sidekick source, e.g. after
+// signing in or when the device list changed. Safe from any thread.
+void refresh_sidekick_properties();

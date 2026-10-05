@@ -23,6 +23,7 @@
 #include <plugin-support.h>
 #include <util/platform.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -551,10 +552,29 @@ bool GleemAccount::refresh_devices(std::string &error)
 			devices.push_back(std::move(device));
 	}
 
-	std::lock_guard lock(mutex_);
-	devices_ = std::move(devices);
-	devices_loaded_ = true;
+	std::function<void()> changed;
+	{
+		std::lock_guard lock(mutex_);
+		const bool same = devices_loaded_ && devices_.size() == devices.size() &&
+				  std::equal(devices_.begin(), devices_.end(), devices.begin(),
+					     [](const IrlDevice &a, const IrlDevice &b) {
+						     return a.uuid == b.uuid && a.name == b.name &&
+							    a.online == b.online;
+					     });
+		devices_ = std::move(devices);
+		devices_loaded_ = true;
+		if (!same)
+			changed = devices_changed_;
+	}
+	if (changed)
+		changed();
 	return true;
+}
+
+void GleemAccount::set_devices_changed_callback(std::function<void()> callback)
+{
+	std::lock_guard lock(mutex_);
+	devices_changed_ = std::move(callback);
 }
 
 std::vector<IrlDevice> GleemAccount::devices() const

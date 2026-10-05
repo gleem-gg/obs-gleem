@@ -27,6 +27,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -43,6 +44,8 @@
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+constexpr const char *source_id = "gleem_irl_sidekick";
 
 constexpr auto tick = std::chrono::seconds(1);
 // How long a connection may try before the URL is fetched again: covers a
@@ -338,8 +341,9 @@ bool device_modified(obs_properties_t *, obs_property_t *, obs_data_t *settings)
 
 bool sign_in_clicked(obs_properties_t *, obs_property_t *, void *)
 {
+	// The dialog is non-modal; it refreshes the properties when it closes.
 	SignInDialog::run();
-	return true;
+	return false;
 }
 
 bool refresh_clicked(obs_properties_t *, obs_property_t *, void *)
@@ -503,10 +507,28 @@ void hide(void *data)
 
 } // namespace
 
+void refresh_sidekick_properties()
+{
+	obs_queue_task(
+		OBS_TASK_UI,
+		[](void *) {
+			obs_enum_sources(
+				[](void *, obs_source_t *source) {
+					if (strcmp(obs_source_get_unversioned_id(source), source_id) == 0)
+						obs_source_update_properties(source);
+					return true;
+				},
+				nullptr);
+		},
+		nullptr, false);
+}
+
 void register_sidekick_source()
 {
+	GleemAccount::instance().set_devices_changed_callback(refresh_sidekick_properties);
+
 	struct obs_source_info info = {};
-	info.id = "gleem_irl_sidekick";
+	info.id = source_id;
 	info.type = OBS_SOURCE_TYPE_INPUT;
 	info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_CUSTOM_DRAW | OBS_SOURCE_DO_NOT_DUPLICATE |
 			    OBS_SOURCE_SRGB;

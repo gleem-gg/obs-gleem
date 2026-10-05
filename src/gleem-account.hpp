@@ -23,6 +23,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -93,6 +94,10 @@ public:
 	void watch();
 	void unwatch();
 
+	// Called, from the polling thread, when the device list or the sign-in
+	// changed: devices added, renamed, gone on- or offline.
+	void set_devices_changed_callback(std::function<void()> callback);
+
 private:
 	GleemAccount() = default;
 
@@ -136,4 +141,5 @@ private:
 	bool stopping_ = false;
 	bool poll_now_ = false;
 	int watchers_ = 0;
+	std::function<void()> devices_changed_;
 };

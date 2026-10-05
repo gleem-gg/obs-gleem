@@ -175,7 +175,25 @@ struct SidekickSource {
 				obs_log(LOG_WARNING, "'%s': %s", obs_source_get_name(source), message.c_str());
 			status = next;
 			error = message;
+			refresh_properties();
 		}
+	}
+
+	// Let an open properties window show the new status.
+	void refresh_properties()
+	{
+		obs_weak_source_t *weak = obs_source_get_weak_source(source);
+		obs_queue_task(
+			OBS_TASK_UI,
+			[](void *param) {
+				auto *weak = static_cast<obs_weak_source_t *>(param);
+				if (obs_source_t *strong = obs_weak_source_get_source(weak)) {
+					obs_source_update_properties(strong);
+					obs_source_release(strong);
+				}
+				obs_weak_source_release(weak);
+			},
+			weak, false);
 	}
 
 	void apply_child(const std::string &input, bool hw)
@@ -411,14 +429,6 @@ bool sign_in_clicked(obs_properties_t *, obs_property_t *, void *)
 	return false;
 }
 
-bool refresh_clicked(obs_properties_t *, obs_property_t *, void *)
-{
-	std::string error;
-	if (!GleemAccount::instance().refresh_devices(error))
-		obs_log(LOG_WARNING, "Could not load the IRL Sidekicks: %s", error.c_str());
-	return true;
-}
-
 bool reconnect_clicked(obs_properties_t *, obs_property_t *, void *data)
 {
 	auto *s = static_cast<SidekickSource *>(data);
@@ -432,40 +442,60 @@ bool reconnect_clicked(obs_properties_t *, obs_property_t *, void *data)
 	return false;
 }
 
-obs_properties_t *get_properties(void *data)
+// A read-only row: `label` on the left, `value` beside it.
+obs_property_t *add_info(obs_properties_t *props, const char *name, const char *label, const std::string &value,
+			 enum obs_text_info_type type = OBS_TEXT_INFO_NORMAL)
 {
-	auto *s = static_cast<SidekickSource *>(data);
-	GleemAccount &account = GleemAccount::instance();
-	obs_properties_t *props = obs_properties_create();
+	obs_property_t *p = obs_properties_add_text(props, name, label, OBS_TEXT_INFO);
+	obs_property_set_long_description(p, value.c_str());
+	obs_property_text_set_info_type(p, type);
+	return p;
+}
 
-	// Account.
+enum obs_text_info_type status_type(Status status)
+{
+	switch (status) {
+	case Status::Error:
+		return OBS_TEXT_INFO_ERROR;
+	case Status::SignedOut:
+	case Status::NotFound:
+	case Status::Offline:
+		return OBS_TEXT_INFO_WARNING;
+	default:
+		return OBS_TEXT_INFO_NORMAL;
+	}
+}
+
+obs_properties_t *account_group(GleemAccount &account)
+{
+	obs_properties_t *group = obs_properties_create();
+	const char *label = obs_module_text("Gleem.Account.Label");
+
 	switch (account.mode()) {
 	case AuthMode::Environment:
-		obs_properties_add_text(props, "account", obs_module_text("Gleem.Account.Rental"), OBS_TEXT_INFO);
+		add_info(group, "account", label, obs_module_text("Gleem.Account.Rental"));
 		break;
 	case AuthMode::OAuth: {
 		const std::string name = account.account_name();
-		std::string label = obs_module_text("Gleem.Account.SignedIn");
-		if (!name.empty()) {
-			label = obs_module_text("Gleem.Account.SignedInAs");
-			const size_t pos = label.find("%1");
-			if (pos != std::string::npos)
-				label.replace(pos, 2, name);
-		}
-		obs_properties_add_text(props, "account", label.c_str(), OBS_TEXT_INFO);
-		obs_properties_add_button2(props, "sign_in", obs_module_text("Gleem.Account.Manage"), sign_in_clicked,
+		add_info(group, "account", label, name.empty() ? obs_module_text("Gleem.Account.SignedIn") : name);
+		obs_properties_add_button2(group, "sign_in", obs_module_text("Gleem.Account.Manage"), sign_in_clicked,
 					   nullptr);
 		break;
 	}
 	case AuthMode::None:
-		obs_properties_add_text(props, "account", obs_module_text("Gleem.Account.SignedOut"), OBS_TEXT_INFO);
-		obs_properties_add_button2(props, "sign_in", obs_module_text("Gleem.SignIn.Button"), sign_in_clicked,
+		add_info(group, "account", label, obs_module_text("Gleem.Account.SignedOut"), OBS_TEXT_INFO_WARNING);
+		obs_properties_add_button2(group, "sign_in", obs_module_text("Gleem.SignIn.Button"), sign_in_clicked,
 					   nullptr);
 		break;
 	}
+	return group;
+}
 
-	// Device.
-	obs_property_t *list = obs_properties_add_list(props, "device_uuid", obs_module_text("Gleem.Source.Device"),
+obs_properties_t *device_group(SidekickSource *s, GleemAccount &account)
+{
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *list = obs_properties_add_list(group, "device_uuid", obs_module_text("Gleem.Source.Device"),
 						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(list, obs_module_text("Gleem.Source.ChooseDevice"), "");
 
@@ -480,8 +510,11 @@ obs_properties_t *get_properties(void *data)
 	bool selected_listed = false;
 	for (const IrlDevice &device : account.devices()) {
 		std::string label = device.name.empty() ? device.uuid : device.name;
-		if (!device.online)
-			label += std::string(" ") + obs_module_text("Gleem.Source.OfflineSuffix");
+		const char *state = device.publishing ? "Gleem.Source.LiveSuffix"
+				    : device.online   ? nullptr
+						      : "Gleem.Source.OfflineSuffix";
+		if (state)
+			label += std::string(" ") + obs_module_text(state);
 		obs_property_list_add_string(list, label.c_str(), device.uuid.c_str());
 		selected_listed = selected_listed || device.uuid == selected;
 	}
@@ -495,8 +528,6 @@ obs_properties_t *get_properties(void *data)
 	obs_property_set_modified_callback(list, device_modified);
 	obs_property_set_enabled(list, account.signed_in());
 
-	obs_properties_add_button2(props, "refresh", obs_module_text("Gleem.Source.Refresh"), refresh_clicked, nullptr);
-
 	if (s) {
 		Status status;
 		std::string error;
@@ -505,21 +536,36 @@ obs_properties_t *get_properties(void *data)
 			status = s->status;
 			error = s->error;
 		}
-		std::string label = std::string(obs_module_text("Gleem.Source.Status")) + " " +
-				    (status == Status::Error ? error : obs_module_text(status_key(status)));
-		obs_properties_add_text(props, "status", label.c_str(), OBS_TEXT_INFO);
-		obs_properties_add_button2(props, "reconnect", obs_module_text("Gleem.Source.Reconnect"),
-					   reconnect_clicked, s);
+		add_info(group, "status", obs_module_text("Gleem.Source.Status"),
+			 status == Status::Error ? error : obs_module_text(status_key(status)), status_type(status));
+		if (!selected.empty() && account.signed_in())
+			obs_properties_add_button2(group, "reconnect", obs_module_text("Gleem.Source.Reconnect"),
+						   reconnect_clicked, s);
 	}
 
-	// Playback.
-	obs_properties_add_bool(props, "hw_decode", obs_module_text("Gleem.Source.HardwareDecode"));
-	obs_properties_add_bool(props, "close_when_hidden", obs_module_text("Gleem.Source.CloseWhenHidden"));
+	const std::string link = "<a href=\"" + account.base_url() + "/dashboard/irl\">" +
+				 obs_module_text("Gleem.Source.Dashboard") + "</a>";
+	add_info(group, "dashboard", "", link);
 
-	obs_property_t *dashboard = obs_properties_add_button2(
-		props, "dashboard", obs_module_text("Gleem.Source.Dashboard"), nullptr, nullptr);
-	obs_property_button_set_type(dashboard, OBS_BUTTON_URL);
-	obs_property_button_set_url(dashboard, (account.base_url() + "/dashboard/irl").data());
+	return group;
+}
+
+obs_properties_t *get_properties(void *data)
+{
+	auto *s = static_cast<SidekickSource *>(data);
+	GleemAccount &account = GleemAccount::instance();
+	obs_properties_t *props = obs_properties_create();
+
+	obs_properties_add_group(props, "account_group", obs_module_text("Gleem.Group.Account"), OBS_GROUP_NORMAL,
+				 account_group(account));
+	obs_properties_add_group(props, "device_group", obs_module_text("Gleem.Group.Device"), OBS_GROUP_NORMAL,
+				 device_group(s, account));
+
+	obs_properties_t *playback = obs_properties_create();
+	obs_properties_add_bool(playback, "hw_decode", obs_module_text("Gleem.Source.HardwareDecode"));
+	obs_properties_add_bool(playback, "close_when_hidden", obs_module_text("Gleem.Source.CloseWhenHidden"));
+	obs_properties_add_group(props, "playback_group", obs_module_text("Gleem.Group.Playback"), OBS_GROUP_NORMAL,
+				 playback);
 
 	return props;
 }

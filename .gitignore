@@ -16,6 +16,10 @@
 !LICENSE
 !README.md
 !/flatpak
+!/packaging
+
+# Exclude Windows release output
+/packaging/windows/build/
 
 # Exclude lock files
 *.lock.json

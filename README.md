@@ -26,6 +26,8 @@ Download the build for your platform from the [releases](https://github.com/glee
 
 It needs OBS Studio 31 or later. Restart OBS after installing.
 
+On Windows, the installer puts the plugin in `C:\ProgramData\obs-studio\plugins\obs-gleem`. To use the `.zip` instead, extract it to `C:\ProgramData\obs-studio\plugins`; for a portable OBS, extract it to the `plugins` folder of that installation (OBS 33 or later).
+
 ## Usage
 
 1. In a scene, add a source with **+** and choose **Gleem IRL Sidekick**.
@@ -65,6 +67,12 @@ This installs to `~/.var/app/com.obsproject.Studio/config/obs-studio/plugins/obs
 ### Windows, macOS, Ubuntu
 
 Use the template's presets, e.g. `cmake --preset windows-x64` or `cmake --preset macos`, then build. CI does the same in `.github/workflows/build-project.yaml`.
+
+## Releasing
+
+1. Set the version in `buildspec.json`, then tag `vX.Y.Z` and push the tag. CI builds every platform and creates a draft release. The draft has no Windows files yet: the build CI keeps as an artifact is unsigned.
+2. On the Windows machine with the Certum card plugged in, run `.\packaging\windows\release.ps1 vX.Y.Z` and enter the card's PIN when asked. It signs the DLL, the installer and its uninstaller, verifies the signatures, and attaches the installer and zip to the draft. It needs [gh](https://cli.github.com), `signtool` from the Windows SDK, [Inno Setup](https://jrsoftware.org/isinfo.php) and proCertumCardManager with the card's certificate registered. `-DryRun` signs without uploading.
+3. Check the draft and publish it.
 
 CI runs on these triggers:
 - `v*` tags build every platform and create a draft release;

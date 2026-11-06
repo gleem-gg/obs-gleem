@@ -53,3 +53,17 @@ FinishedLabel=Setup has finished installing [name]. Restart OBS Studio to load t
 ; The stage holds the DLL twice, for OBS 33+ and for OBS 31 and 32: see
 ; set_target_properties_plugin in cmake/windows/helpers.cmake.
 Source: "{#Stage}\*"; Excludes: "*.pdb"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+
+[Code]
+// The uninstaller does not use Restart Manager. With OBS running, it would
+// remove all but the locked DLL and its own entry, and OBS would keep loading
+// that DLL with no uninstaller left to remove it. A silent uninstall stops here
+// and changes nothing. OBSStudioCore is the mutex a non-portable OBS holds;
+// portable OBS does not load plugins from ProgramData.
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  while Result and CheckForMutexes('OBSStudioCore') do
+    Result := SuppressibleMsgBox('OBS Studio is running. Close it, then click Retry to uninstall Gleem for OBS.',
+      mbError, MB_RETRYCANCEL, IDCANCEL) = IDRETRY;
+end;

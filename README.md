@@ -71,7 +71,7 @@ Use the template's presets, e.g. `cmake --preset windows-x64` or `cmake --preset
 ## Releasing
 
 1. Set the version in `buildspec.json`, then tag `vX.Y.Z` and push the tag. CI builds every platform and creates a draft release. The draft has no Windows files yet: the build CI keeps as an artifact is unsigned.
-2. On the Windows machine with the Certum card plugged in, run `.\packaging\windows\release.ps1 vX.Y.Z` and enter the card's PIN when asked. It signs the DLL, the installer and its uninstaller, verifies the signatures, and attaches the installer and zip to the draft. It needs [gh](https://cli.github.com), `signtool` from the Windows SDK, [Inno Setup](https://jrsoftware.org/isinfo.php) and proCertumCardManager with the card's certificate registered. `-DryRun` signs without uploading.
+2. On the Windows machine with the Certum card plugged in, run `.\packaging\windows\release.ps1 vX.Y.Z` and enter the card's PIN when asked. It signs the DLL, the installer and its uninstaller, verifies the DLL's and the installer's signatures, and attaches the installer and zip to the draft. It needs [gh](https://cli.github.com), `signtool` from the Windows SDK, [Inno Setup](https://jrsoftware.org/isinfo.php) and proCertumCardManager with the card's certificate registered. `-DryRun` signs without uploading.
 3. Check the draft and publish it.
 
 CI runs on these triggers:

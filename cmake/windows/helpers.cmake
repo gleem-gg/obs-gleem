@@ -25,7 +25,7 @@ function(set_target_properties_plugin target)
   # OBS 33 and later load <plugin>/<plugin>.dll, OBS 31 and 32 only know
   # <plugin>/bin/64bit/<plugin>.dll. OBS 33 skips the second copy once the first
   # has loaded, so shipping both covers every supported version. Drop the legacy
-  # copy when the minimum is OBS 33: legacy locations stop loading in OBS 34.
+  # copy when the minimum is OBS 33: OBS only supports the new structure now.
   # https://obsproject.com/kb/legacy-plugin-developer-info
   install(TARGETS ${target} RUNTIME DESTINATION "${target}" LIBRARY DESTINATION "${target}")
   install(TARGETS ${target} RUNTIME DESTINATION "${target}/bin/64bit" LIBRARY DESTINATION "${target}/bin/64bit")

@@ -6,7 +6,8 @@
 # 1. waits for that tag's CI run and downloads its Windows zip;
 # 2. signs the plugin DLL, builds the installer with a signed uninstaller,
 #    signs the installer and packs the zip again around the signed DLL (RFC 3161
-#    timestamps throughout), and verifies each signature;
+#    timestamps throughout), and verifies the DLL's and the installer's
+#    signatures (the uninstaller only exists inside the installer);
 # 3. attaches installer and zip to the tag's draft release and adds their
 #    checksums to its notes. Publishing the draft is left to you.
 #
@@ -31,6 +32,11 @@ param(
     [switch] $DryRun
 )
 $ErrorActionPreference = 'Stop'
+
+# gh prints UTF-8; PowerShell would read it in the console's code page and garble the notes.
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+# Windows PowerShell's ZipFile otherwise writes backslashes into entry names.
+[AppContext]::SetSwitch('Switch.System.IO.Compression.ZipFile.UseBackslash', $false)
 
 $Repo = 'gleem-gg/obs-gleem'
 $Workflow = 'push.yaml'

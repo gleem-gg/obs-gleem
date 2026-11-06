@@ -3,7 +3,8 @@ param(
     [ValidateSet('x64')]
     [string] $Target = 'x64',
     [ValidateSet('Debug', 'RelWithDebInfo', 'Release', 'MinSizeRel')]
-    [string] $Configuration = 'RelWithDebInfo'
+    [string] $Configuration = 'RelWithDebInfo',
+    [switch] $Package
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +54,7 @@ function Package {
         ErrorAction = 'SilentlyContinue'
         Path = @(
             "${ProjectRoot}/release/${ProductName}-*-windows-*.zip"
+            "${ProjectRoot}/release/${ProductName}-*-windows-*.exe"
         )
     }
 
@@ -66,6 +68,16 @@ function Package {
         Verbose = ($Env:CI -ne $null)
     }
     Compress-Archive -Force @CompressArgs
+
+    if ( $Package ) {
+        Log-Group "Building the unsigned installer of ${ProductName}..."
+        $InstallerArgs = @{
+            Stage = "${ProjectRoot}/release/${Configuration}/${ProductName}"
+            Version = $ProductVersion
+            OutputDir = "${ProjectRoot}/release"
+        }
+        & "${ProjectRoot}/packaging/windows/build-installer.ps1" @InstallerArgs
+    }
     Log-Group
 }
 

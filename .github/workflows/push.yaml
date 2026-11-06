@@ -63,8 +63,9 @@ jobs:
           root_dir="$(pwd)"
           commit_hash="${GITHUB_SHA:0:9}"
 
+          # Not windows-x64: the signing card is not reachable from CI, so
+          # packaging/windows/release.ps1 adds the signed files to the draft.
           variants=(
-            'windows-x64;zip|exe'
             'macos-universal;tar.xz|pkg'
             'ubuntu-24.04-x86_64;tar.xz|deb|ddeb'
             'sources;tar.xz'
@@ -88,7 +89,7 @@ jobs:
           shopt -s extglob
 
           echo "### Checksums" > ${{ github.workspace }}/CHECKSUMS.txt
-          for file in ${{ github.workspace }}/@(*.exe|*.deb|*.ddeb|*.pkg|*.tar.xz|*.zip); do
+          for file in ${{ github.workspace }}/@(*.deb|*.ddeb|*.pkg|*.tar.xz); do
             echo "    ${file##*/}: $(sha256sum "${file}" | cut -d " " -f 1)" >> ${{ github.workspace }}/CHECKSUMS.txt
           done
 
@@ -103,8 +104,6 @@ jobs:
           name: ${{ needs.build-project.outputs.pluginName }} ${{ steps.check.outputs.version }}
           body_path: ${{ github.workspace }}/CHECKSUMS.txt
           files: |
-            ${{ github.workspace }}/*.exe
-            ${{ github.workspace }}/*.zip
             ${{ github.workspace }}/*.pkg
             ${{ github.workspace }}/*.deb
             ${{ github.workspace }}/*.ddeb
